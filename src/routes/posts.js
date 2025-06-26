@@ -1,11 +1,12 @@
 /**
- * Social Media Posts routes (LinkedIn & X)
+ * Posts routes for social media platforms
  * @module routes/posts
  */
 
 const express = require("express");
 const multer = require("multer");
-const authController = require("../controllers/authController");
+const LinkedinController = require("../controllers/linkedinController");
+const XController = require("../controllers/xController");
 const { authenticateToken } = require("../middleware/auth");
 
 const router = express.Router();
@@ -14,45 +15,26 @@ const router = express.Router();
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 100 * 1024 * 1024, // 100MB max file size
-  },
-  fileFilter: (req, file, cb) => {
-    // Accept images and videos
-    if (
-      file.mimetype.startsWith("image/") ||
-      file.mimetype.startsWith("video/")
-    ) {
-      cb(null, true);
-    } else {
-      cb(new Error("Only image and video files are allowed"), false);
-    }
+    fileSize: 512 * 1024 * 1024, // 512MB max file size
   },
 });
 
-// LinkedIn post creation
-router.post(
-  "/linkedin/post",
-  authenticateToken,
-  authController.createLinkedInPost
-);
-
-// LinkedIn media upload
+// LinkedIn post routes
+router.post("/linkedin/post", authenticateToken, LinkedinController.createPost);
 router.post(
   "/linkedin/upload",
   authenticateToken,
-  upload.single("media"),
-  authController.uploadLinkedInMedia
+  upload.single("file"),
+  LinkedinController.uploadMedia
 );
 
-// X (Twitter) tweet creation
-router.post("/x/tweet", authenticateToken, authController.createXTweet);
-
-// X (Twitter) media upload
+// X (Twitter) post routes
+router.post("/x/tweet", authenticateToken, XController.createTweet);
 router.post(
   "/x/upload",
   authenticateToken,
-  upload.single("media"),
-  authController.uploadXMedia
+  upload.single("file"),
+  XController.uploadMedia
 );
 
 module.exports = router;

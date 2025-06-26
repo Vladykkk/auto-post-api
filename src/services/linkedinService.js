@@ -4,6 +4,7 @@
  */
 
 const axios = require("axios");
+const crypto = require("crypto");
 const config = require("../config/environment");
 
 /**
@@ -182,9 +183,6 @@ async function createPost(accessToken, postData) {
       }));
     } else if (mediaType !== "NONE" && mediaType !== "ARTICLE") {
       // If mediaType is IMAGE/VIDEO but no media provided, fall back to NONE
-      console.warn(
-        `⚠️ MediaType ${mediaType} specified but no media provided, falling back to NONE`
-      );
       shareContent.shareMediaCategory = "NONE";
     }
 
@@ -219,8 +217,6 @@ async function createPost(accessToken, postData) {
       message: "Post created successfully",
     };
   } catch (error) {
-    console.error("LinkedIn post creation error:", error);
-
     throw new Error(
       `Post creation failed: ${
         error.response?.data?.message ||
@@ -349,14 +345,11 @@ async function uploadMedia(
 }
 
 /**
- * Generates random state for OAuth security
+ * Generates cryptographically secure random state parameter
  * @returns {string} Random state string
  */
 function generateState() {
-  return (
-    Math.random().toString(36).substring(2, 15) +
-    Math.random().toString(36).substring(2, 15)
-  );
+  return crypto.randomBytes(32).toString("hex");
 }
 
 module.exports = {

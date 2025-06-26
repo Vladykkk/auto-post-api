@@ -1,12 +1,11 @@
 {
-  "name": "auto-post-be",
-  "version": "1.0.0",
-  "description": "Backend API with LinkedIn OAuth 2.0 authentication",
+  "name": "social-media-oauth-backend",
+  "version": "2.0.0",
+  "description": "Clean, modular Node.js backend for social media OAuth authentication and posting",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
     "dev": "nodemon app.js",
-    "start:legacy": "node server.js",
     "lint": "eslint . --ext .js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -18,17 +17,23 @@
     "express-session": "^1.18.1",
     "form-data": "^4.0.3",
     "jsonwebtoken": "^9.0.2",
-    "multer": "^2.0.1"
+    "multer": "^2.0.1",
+    "selenium-webdriver": "^4.33.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
   },
   "keywords": [
-    "linkedin",
     "oauth",
+    "linkedin",
+    "twitter",
+    "x",
+    "social-media",
     "authentication",
     "node.js",
-    "express"
+    "express",
+    "jwt",
+    "modular"
   ],
   "author": "",
   "license": "ISC"

@@ -49,6 +49,7 @@ const config = {
   jwt: {
     secret: process.env.JWT_SECRET,
     expiresIn: process.env.JWT_EXPIRES_IN || "24h",
+    xTokenExpiresIn: process.env.X_TOKEN_EXPIRES_IN || "7d", // Extended expiration for X tokens
   },
 
   // Server Configuration

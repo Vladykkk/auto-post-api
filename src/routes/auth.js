@@ -4,38 +4,53 @@
  */
 
 const express = require("express");
-const authController = require("../controllers/authController");
+const multer = require("multer");
+const LinkedinController = require("../controllers/linkedinController");
+const XController = require("../controllers/xController");
+const BaseController = require("../controllers/baseController");
 const { authenticateToken } = require("../middleware/auth");
 
 const router = express.Router();
 
+// Configure multer for file uploads
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 512 * 1024 * 1024, // 512MB max file size
+  },
+});
+
 // LinkedIn OAuth routes
-router.get("/linkedin", authController.initiateLinkedInAuth);
-router.get("/linkedin/callback", authController.handleLinkedInCallback);
+router.get("/linkedin", LinkedinController.initiateAuth);
+router.get("/linkedin/callback", LinkedinController.handleCallback);
+
+// LinkedIn API routes
+router.get(
+  "/linkedin/user",
+  authenticateToken,
+  LinkedinController.getCurrentUser
+);
+router.get(
+  "/linkedin/user/refresh",
+  authenticateToken,
+  LinkedinController.refreshProfile
+);
+router.get(
+  "/linkedin/profile",
+  authenticateToken,
+  LinkedinController.refreshProfile
+); // Alias
 
 // X (Twitter) OAuth routes
-router.get("/x", authController.initiateXAuth);
-router.get("/x/callback", authController.handleXCallback);
+router.get("/x", XController.initiateAuth);
+router.get("/x/callback", XController.handleCallback);
 
-// Protected routes - LinkedIn
-router.get("/user", authenticateToken, authController.getCurrentUser);
-router.get(
-  "/user/refresh",
-  authenticateToken,
-  authController.refreshUserProfile
-);
-router.get("/profile", authenticateToken, authController.getDetailedProfile);
+// X API routes
+router.get("/x/user", authenticateToken, XController.getCurrentUser);
+router.get("/x/user/refresh", authenticateToken, XController.refreshProfile);
 
-// Protected routes - X (Twitter)
-router.get("/x/user", authenticateToken, authController.getCurrentXUser);
-router.get(
-  "/x/user/refresh",
-  authenticateToken,
-  authController.refreshXUserProfile
-);
-
-// Common protected routes
-router.post("/linkedin/logout", authenticateToken, authController.logout);
-router.post("/x/logout", authenticateToken, authController.logout);
+// Common logout route
+router.post("/linkedin/logout", authenticateToken, BaseController.logout);
+router.post("/x/logout", authenticateToken, BaseController.logout);
 
 module.exports = router;

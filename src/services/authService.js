@@ -7,59 +7,89 @@ const jwt = require("jsonwebtoken");
 const config = require("../config/environment");
 
 /**
- * Creates a JWT token with user data from LinkedIn
+ * Provider-specific token creation configurations
+ */
+const PROVIDER_CONFIGS = {
+  linkedin: {
+    userIdField: "linkedinId",
+    defaultExpiration: config.jwt.expiresIn,
+  },
+  x: {
+    userIdField: "xId",
+    defaultExpiration: config.jwt.xTokenExpiresIn || config.jwt.expiresIn,
+  },
+  substack: {
+    userIdField: "substackId",
+    defaultExpiration: config.jwt.expiresIn,
+  },
+};
+
+/**
+ * Creates a JWT token for any provider
+ * @param {string} provider - Provider name ('linkedin', 'x', 'substack')
  * @param {Object} userData - User data to encode in token
- * @param {string} userData.id - User ID
- * @param {string} userData.email - User email
- * @param {string} userData.name - User name
- * @param {string} accessToken - LinkedIn access token
- * @param {number} [expiresIn] - LinkedIn token expiration (optional)
+ * @param {string} accessToken - Provider access token
+ * @param {string} [refreshToken] - Provider refresh token (optional)
+ * @param {number} [expiresIn] - Custom expiration time in seconds (optional)
  * @returns {string} JWT token
  */
-function createToken(userData, accessToken, expiresIn) {
+function createToken(
+  provider,
+  userData,
+  accessToken,
+  refreshToken = null,
+  expiresIn = null
+) {
+  const providerConfig = PROVIDER_CONFIGS[provider];
+  if (!providerConfig) {
+    throw new Error(`Unsupported provider: ${provider}`);
+  }
+
   const payload = {
-    linkedinId: userData.id,
+    [providerConfig.userIdField]: userData.id,
     email: userData.email,
     name: userData.name,
     accessToken,
-    provider: "linkedin",
+    provider,
   };
 
+  // Add provider-specific fields
+  if (provider === "x") {
+    payload.username = userData.username;
+  }
+
+  if (refreshToken) {
+    payload.refreshToken = refreshToken;
+  }
+
   const options = {
-    expiresIn: expiresIn ? `${expiresIn}s` : config.jwt.expiresIn,
+    expiresIn: expiresIn ? `${expiresIn}s` : providerConfig.defaultExpiration,
   };
 
   return jwt.sign(payload, config.jwt.secret, options);
 }
 
 /**
- * Creates a JWT token with X (Twitter) user data
- * @param {Object} userData - User data to encode in token
- * @param {string} userData.id - User ID
- * @param {string} userData.username - X username
- * @param {string} userData.name - User name
- * @param {string} userData.email - User email (may be null)
- * @param {string} accessToken - X access token
- * @param {string} [refreshToken] - X refresh token (optional)
- * @param {number} [expiresIn] - X token expiration (optional)
- * @returns {string} JWT token
+ * Parses expiration string to seconds
+ * @param {string} expirationStr - Expiration string (e.g., "7d", "24h", "3600s")
+ * @returns {number} Expiration time in seconds
  */
-function createXToken(userData, accessToken, refreshToken, expiresIn) {
-  const payload = {
-    xId: userData.id,
-    username: userData.username,
-    email: userData.email,
-    name: userData.name,
-    accessToken,
-    refreshToken,
-    provider: "x",
-  };
+function parseExpirationToSeconds(expirationStr) {
+  if (typeof expirationStr === "number") return expirationStr;
 
-  const options = {
-    expiresIn: expiresIn ? `${expiresIn}s` : config.jwt.expiresIn,
-  };
+  const str = expirationStr.toString();
+  if (str.endsWith("d")) {
+    return parseInt(str) * 24 * 60 * 60;
+  } else if (str.endsWith("h")) {
+    return parseInt(str) * 60 * 60;
+  } else if (str.endsWith("s")) {
+    return parseInt(str);
+  } else if (str.endsWith("m")) {
+    return parseInt(str) * 60;
+  }
 
-  return jwt.sign(payload, config.jwt.secret, options);
+  // Default to 7 days if format is unclear
+  return 7 * 24 * 60 * 60;
 }
 
 /**
@@ -89,7 +119,6 @@ function extractBearerToken(authHeader) {
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return null;
   }
-
   return authHeader.split(" ")[1];
 }
 
@@ -99,21 +128,54 @@ function extractBearerToken(authHeader) {
  * @returns {Object} Formatted user data
  */
 function formatUserFromToken(tokenPayload) {
-  const { linkedinId, email, name, iat, exp } = tokenPayload;
+  const { provider, email, name, iat, exp } = tokenPayload;
 
-  return {
-    id: linkedinId,
+  const baseUser = {
     name,
     email,
+    provider,
     loginTime: new Date(iat * 1000).toISOString(),
     tokenExpires: new Date(exp * 1000).toISOString(),
   };
+
+  // Add provider-specific fields
+  if (provider === "linkedin") {
+    baseUser.id = tokenPayload.linkedinId;
+  } else if (provider === "x") {
+    baseUser.id = tokenPayload.xId;
+    baseUser.username = tokenPayload.username;
+  } else if (provider === "substack") {
+    baseUser.id = tokenPayload.substackId;
+  }
+
+  return baseUser;
+}
+
+/**
+ * Checks if token needs refresh (expires within specified minutes)
+ * @param {Object} tokenPayload - Decoded JWT payload
+ * @param {number} [thresholdMinutes=30] - Minutes before expiration to trigger refresh
+ * @returns {boolean} True if token needs refresh
+ */
+function needsRefresh(tokenPayload, thresholdMinutes = 30) {
+  const now = Math.floor(Date.now() / 1000);
+  const expiresIn = tokenPayload.exp - now;
+  const threshold = thresholdMinutes * 60;
+
+  return expiresIn <= threshold;
 }
 
 module.exports = {
   createToken,
-  createXToken,
+  parseExpirationToSeconds,
   verifyToken,
   extractBearerToken,
   formatUserFromToken,
+  needsRefresh,
+
+  // Legacy compatibility
+  createXToken: (userData, accessToken, refreshToken, expiresIn) =>
+    createToken("x", userData, accessToken, refreshToken, expiresIn),
+  createToken: (userData, accessToken, expiresIn) =>
+    createToken("linkedin", userData, accessToken, null, expiresIn),
 };

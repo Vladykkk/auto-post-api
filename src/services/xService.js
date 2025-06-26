@@ -80,8 +80,6 @@ async function exchangeCodeForToken(code, codeVerifier) {
   };
 
   try {
-    console.log("🔄 Exchanging X authorization code for access token...");
-
     const response = await axios.post(X_ENDPOINTS.OAUTH_TOKEN, tokenData, {
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -91,13 +89,8 @@ async function exchangeCodeForToken(code, codeVerifier) {
       },
     });
 
-    console.log("✅ X access token obtained successfully");
     return response.data;
   } catch (error) {
-    console.error(
-      "❌ Error exchanging X code for token:",
-      error.response?.data || error.message
-    );
     throw new Error(
       `X token exchange failed: ${
         error.response?.data?.error_description || error.message
@@ -113,8 +106,6 @@ async function exchangeCodeForToken(code, codeVerifier) {
  */
 async function getUserProfile(accessToken) {
   try {
-    console.log("🔄 Fetching X user profile...");
-
     const response = await axios.get(X_ENDPOINTS.USER_ME, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -126,9 +117,6 @@ async function getUserProfile(accessToken) {
     });
 
     const userData = response.data.data;
-    console.log(
-      `👤 X profile fetched for user: ${userData.name} (@${userData.username})`
-    );
 
     return {
       id: userData.id,
@@ -142,10 +130,6 @@ async function getUserProfile(accessToken) {
       publicMetrics: userData.public_metrics,
     };
   } catch (error) {
-    console.error(
-      "❌ Error fetching X user profile:",
-      error.response?.data || error.message
-    );
     throw new Error(
       `Failed to fetch X user profile: ${
         error.response?.data?.error || error.message
@@ -176,8 +160,6 @@ async function getUserProfile(accessToken) {
  */
 async function createTweet(accessToken, tweetData) {
   try {
-    console.log("🔄 Creating X tweet...");
-
     // Validate required fields
     if (!tweetData.text || tweetData.text.trim().length === 0) {
       throw new Error("Tweet text is required");
@@ -226,8 +208,6 @@ async function createTweet(accessToken, tweetData) {
       payload.for_super_followers_only = tweetData.for_super_followers_only;
     }
 
-    console.log("📤 Tweet payload:", JSON.stringify(payload, null, 2));
-
     const response = await axios.post(X_ENDPOINTS.TWEETS, payload, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -235,14 +215,8 @@ async function createTweet(accessToken, tweetData) {
       },
     });
 
-    console.log(`✅ X tweet created successfully: ${response.data.data.id}`);
     return response.data.data;
   } catch (error) {
-    console.error("❌ Error creating X tweet:");
-    console.error("Status:", error.response?.status);
-    console.error("Data:", error.response?.data);
-    console.error("Message:", error.message);
-
     throw new Error(
       `Failed to create X tweet: ${
         error.response?.data?.detail ||
@@ -266,8 +240,6 @@ async function refreshAccessToken(refreshToken) {
   };
 
   try {
-    console.log("🔄 Refreshing X access token...");
-
     const response = await axios.post(X_ENDPOINTS.OAUTH_TOKEN, tokenData, {
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -277,13 +249,8 @@ async function refreshAccessToken(refreshToken) {
       },
     });
 
-    console.log("✅ X access token refreshed successfully");
     return response.data;
   } catch (error) {
-    console.error(
-      "❌ Error refreshing X access token:",
-      error.response?.data || error.message
-    );
     throw new Error(
       `X token refresh failed: ${
         error.response?.data?.error_description || error.message
@@ -302,8 +269,6 @@ async function refreshAccessToken(refreshToken) {
  */
 async function uploadMedia(accessToken, mediaBuffer, mediaType, altText) {
   try {
-    console.log(`🔄 Uploading ${mediaType} to X using v2 API...`);
-
     // Validate media type
     const allowedTypes = ["image", "video"];
     if (!allowedTypes.includes(mediaType)) {
@@ -344,9 +309,6 @@ async function uploadMedia(accessToken, mediaBuffer, mediaType, altText) {
       timeout: 60000, // 60 second timeout for media uploads
     });
 
-    console.log("✅ X media uploaded successfully");
-    console.log("Response data:", response.data);
-
     // Extract media ID from v2 API response
     const mediaId = response.data.data?.id || response.data.media_id_string;
 
@@ -363,12 +325,6 @@ async function uploadMedia(accessToken, mediaBuffer, mediaType, altText) {
       processing_info: response.data.data?.processing_info,
     };
   } catch (error) {
-    console.error("❌ Error uploading X media:");
-    console.error("Status:", error.response?.status);
-    console.error("Headers:", error.response?.headers);
-    console.error("Data:", JSON.stringify(error.response?.data, null, 2));
-    console.error("Message:", error.message);
-
     // Handle specific X API v2 error format
     const errorMessage =
       error.response?.data?.errors?.[0]?.detail ||
@@ -387,8 +343,6 @@ async function uploadMedia(accessToken, mediaBuffer, mediaType, altText) {
  */
 async function revokeAccessToken(accessToken) {
   try {
-    console.log("🔄 Revoking X access token...");
-
     await axios.post(
       X_ENDPOINTS.OAUTH_REVOKE,
       { token: accessToken },
@@ -401,13 +355,7 @@ async function revokeAccessToken(accessToken) {
         },
       }
     );
-
-    console.log("✅ X access token revoked successfully");
   } catch (error) {
-    console.error(
-      "❌ Error revoking X access token:",
-      error.response?.data || error.message
-    );
     throw new Error(
       `Failed to revoke X access token: ${
         error.response?.data?.error || error.message

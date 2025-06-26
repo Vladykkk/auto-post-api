@@ -49,6 +49,13 @@ router.get("/", (req, res) => {
               createTweet: "/api/posts/x/tweet",
               uploadMedia: "/api/posts/x/upload",
             },
+            substack: {
+              createSession: "/api/substack/session",
+              login: "/api/substack/login",
+              verify: "/api/substack/verify",
+              sessionStatus: "/api/substack/session/:sessionId",
+              closeSession: "/api/substack/session/:sessionId",
+            },
           },
         },
       }
@@ -64,6 +71,7 @@ router.use("/api/posts", postsRoutes); // Posts routes
 // API route compatibility
 router.use("/api/linkedin", authRoutes); // LinkedIn API routes
 router.use("/api/x", authRoutes); // X (Twitter) API routes
+router.use("/api/substack", authRoutes); // Substack API routes
 router.use("/getProfile", authRoutes); // Legacy compatibility
 
 module.exports = router;

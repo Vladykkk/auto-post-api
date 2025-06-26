@@ -63,7 +63,8 @@ app.use((req, res, next) => {
  */
 if (config.server.nodeEnv === "development") {
   app.use((req, res, next) => {
-    console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+    const timestamp = new Date().toISOString();
+    console.log(`[${timestamp}] ${req.method} ${req.path}`);
     next();
   });
 }
@@ -83,25 +84,39 @@ app.use(globalErrorHandler);
  * Start server
  */
 const server = app.listen(config.server.port, () => {
-  console.log("🚀 LinkedIn OAuth Server Started");
+  console.log("🚀 Social Media OAuth Server Started");
   console.log("=".repeat(50));
   console.log(`📍 Server: http://localhost:${config.server.port}`);
   console.log(
-    `🔗 OAuth URL: http://localhost:${config.server.port}/auth/linkedin`
+    `🔗 LinkedIn: http://localhost:${config.server.port}/auth/linkedin`
   );
+  console.log(`🔗 X (Twitter): http://localhost:${config.server.port}/auth/x`);
   console.log(`🌍 Environment: ${config.server.nodeEnv}`);
   console.log(`🎯 Frontend URL: ${config.server.frontendUrl}`);
   console.log("=".repeat(50));
 
   // Configuration warnings
+  const warnings = [];
+
   if (!config.linkedin.clientId || !config.linkedin.clientSecret) {
-    console.warn("⚠️  Warning: LinkedIn credentials not configured");
-    console.warn("   Please set LINKEDIN_CLIENT_ID and LINKEDIN_CLIENT_SECRET");
+    warnings.push(
+      "LinkedIn credentials not configured (LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET)"
+    );
+  }
+
+  if (!config.x.clientId || !config.x.clientSecret) {
+    warnings.push(
+      "X credentials not configured (X_CLIENT_ID, X_CLIENT_SECRET)"
+    );
   }
 
   if (!config.jwt.secret || config.jwt.secret === "your-secret-key") {
-    console.warn("⚠️  Warning: JWT secret not configured or using default");
-    console.warn("   Please set a secure JWT_SECRET in your environment");
+    warnings.push("JWT secret not configured or using default (JWT_SECRET)");
+  }
+
+  if (warnings.length > 0) {
+    console.warn("⚠️  Configuration Warnings:");
+    warnings.forEach((warning) => console.warn(`   • ${warning}`));
   }
 });
 
