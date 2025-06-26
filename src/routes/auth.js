@@ -24,33 +24,8 @@ const upload = multer({
 router.get("/linkedin", LinkedinController.initiateAuth);
 router.get("/linkedin/callback", LinkedinController.handleCallback);
 
-// LinkedIn API routes
-router.get(
-  "/linkedin/user",
-  authenticateToken,
-  LinkedinController.getCurrentUser
-);
-router.get(
-  "/linkedin/user/refresh",
-  authenticateToken,
-  LinkedinController.refreshProfile
-);
-router.get(
-  "/linkedin/profile",
-  authenticateToken,
-  LinkedinController.refreshProfile
-); // Alias
-
 // X (Twitter) OAuth routes
 router.get("/x", XController.initiateAuth);
 router.get("/x/callback", XController.handleCallback);
-
-// X API routes
-router.get("/x/user", authenticateToken, XController.getCurrentUser);
-router.get("/x/user/refresh", authenticateToken, XController.refreshProfile);
-
-// Common logout route
-router.post("/linkedin/logout", authenticateToken, BaseController.logout);
-router.post("/x/logout", authenticateToken, BaseController.logout);
 
 module.exports = router;

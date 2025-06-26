@@ -5,6 +5,9 @@
 
 const express = require("express");
 const authRoutes = require("./auth");
+const apiRoutes = require("./api");
+const linkedinApiRoutes = require("./linkedinApi");
+const xApiRoutes = require("./xApi");
 const postsRoutes = require("./posts");
 const { createSuccessResponse } = require("../utils/response");
 
@@ -65,13 +68,14 @@ router.get("/", (req, res) => {
 
 // Mount route modules
 router.use("/auth", authRoutes);
-router.use("/api/auth", authRoutes); // Add support for /api/auth/* pattern
-router.use("/api/posts", postsRoutes); // Posts routes
+router.use("/api/posts", postsRoutes);
 
-// API route compatibility
-router.use("/api/linkedin", authRoutes); // LinkedIn API routes
-router.use("/api/x", authRoutes); // X (Twitter) API routes
-router.use("/api/substack", authRoutes); // Substack API routes
-router.use("/getProfile", authRoutes); // Legacy compatibility
+// API routes
+router.use("/api/auth", apiRoutes);
+router.use("/api/linkedin", linkedinApiRoutes);
+router.use("/api/x", xApiRoutes);
+
+// Legacy compatibility
+router.use("/getProfile", linkedinApiRoutes);
 
 module.exports = router;

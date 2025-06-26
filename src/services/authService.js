@@ -62,8 +62,17 @@ function createToken(
     payload.refreshToken = refreshToken;
   }
 
+  let tokenExpiration;
+  if (expiresIn) {
+    // If expiresIn is a number, treat it as seconds
+    tokenExpiration = typeof expiresIn === "number" ? expiresIn : expiresIn;
+  } else {
+    // Use default expiration from config
+    tokenExpiration = providerConfig.defaultExpiration;
+  }
+
   const options = {
-    expiresIn: expiresIn ? `${expiresIn}s` : providerConfig.defaultExpiration,
+    expiresIn: tokenExpiration,
   };
 
   return jwt.sign(payload, config.jwt.secret, options);
@@ -176,6 +185,6 @@ module.exports = {
   // Legacy compatibility
   createXToken: (userData, accessToken, refreshToken, expiresIn) =>
     createToken("x", userData, accessToken, refreshToken, expiresIn),
-  createToken: (userData, accessToken, expiresIn) =>
+  createLinkedInToken: (userData, accessToken, expiresIn) =>
     createToken("linkedin", userData, accessToken, null, expiresIn),
 };
