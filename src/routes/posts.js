@@ -24,7 +24,7 @@ router.post("/linkedin/post", authenticateToken, LinkedinController.createPost);
 router.post(
   "/linkedin/upload",
   authenticateToken,
-  upload.single("file"),
+  upload.single("media"),
   LinkedinController.uploadMedia
 );
 
@@ -33,7 +33,7 @@ router.post("/x/tweet", authenticateToken, XController.createTweet);
 router.post(
   "/x/upload",
   authenticateToken,
-  upload.single("file"),
+  upload.single("media"),
   XController.uploadMedia
 );
 

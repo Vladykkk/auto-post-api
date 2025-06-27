@@ -176,7 +176,7 @@ class LinkedinController extends BaseController {
     if (!req.file) {
       return res
         .status(400)
-        .json(createErrorResponse("No file uploaded", { field: "file" }));
+        .json(createErrorResponse("No file uploaded", { field: "media" }));
     }
 
     const { accessToken, linkedinId, name } = req.user;
@@ -204,7 +204,7 @@ class LinkedinController extends BaseController {
             maxSize / (1024 * 1024)
           }MB`,
           {
-            field: "file",
+            field: "media",
             size: req.file.size,
             maxSize: maxSize,
             mediaType: mediaType,

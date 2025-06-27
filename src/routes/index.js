@@ -8,6 +8,7 @@ const authRoutes = require("./auth");
 const apiRoutes = require("./api");
 const linkedinApiRoutes = require("./linkedinApi");
 const xApiRoutes = require("./xApi");
+const substackApiRoutes = require("./substackApi");
 const postsRoutes = require("./posts");
 const { createSuccessResponse } = require("../utils/response");
 
@@ -74,6 +75,7 @@ router.use("/api/posts", postsRoutes);
 router.use("/api/auth", apiRoutes);
 router.use("/api/linkedin", linkedinApiRoutes);
 router.use("/api/x", xApiRoutes);
+router.use("/api/substack", substackApiRoutes);
 
 // Legacy compatibility
 router.use("/getProfile", linkedinApiRoutes);

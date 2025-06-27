@@ -62,6 +62,7 @@ npm start
 
 - `GET /api/linkedin/user` - Get LinkedIn user info
 - `GET /api/x/user` - Get X user info
+- `GET /api/substack/user` - Get Substack user info
 
 ### Posts
 
@@ -69,6 +70,17 @@ npm start
 - `POST /api/posts/x/tweet` - Create X tweet
 - `POST /api/posts/linkedin/upload` - Upload LinkedIn media
 - `POST /api/posts/x/upload` - Upload X media
+
+### Substack Automation
+
+- `POST /api/substack/session` - Create browser session
+- `POST /api/substack/login` - Initiate login with email
+- `POST /api/substack/verify` - Submit verification code
+- `GET /api/substack/sessions` - Get all sessions (active + persistent)
+- `GET /api/substack/session/:id` - Get session status
+- `POST /api/substack/session/:id/reconnect` - Reconnect persistent session
+- `DELETE /api/substack/session/:id` - Close session
+- `POST /api/substack/post` - Create/publish Substack post
 
 ### Logout
 
