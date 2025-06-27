@@ -377,4 +377,87 @@ router.post("/post", async (req, res) => {
   }
 });
 
+// Update session status manually (for avoiding re-authentication)
+router.put("/session/:sessionId/status", async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { status, userData } = req.body;
+
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        message: "Status is required",
+        meta: { field: "status" },
+      });
+    }
+
+    // Get session from persistent storage
+    const session = await substackService.getSessionStatus(sessionId);
+    if (!session.exists) {
+      return res.status(404).json({
+        success: false,
+        message: "Session not found",
+        meta: { sessionId },
+      });
+    }
+
+    // Update session in persistent storage
+    const updatedSession = {
+      id: sessionId,
+      status: status,
+      email: session.email,
+      createdAt: session.createdAt,
+      userData: userData || session.userData,
+    };
+
+    await substackService.updateSessionStatus(sessionId, updatedSession);
+
+    res.json({
+      success: true,
+      message: "Session status updated successfully",
+      data: {
+        sessionId,
+        oldStatus: session.status,
+        newStatus: status,
+      },
+    });
+  } catch (error) {
+    console.error("Error updating session status:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update session status",
+      meta: { error: error.message },
+    });
+  }
+});
+
+/**
+ * Refresh session authentication tokens
+ * POST /api/substack/session/:sessionId/refresh
+ */
+router.post("/session/:sessionId/refresh", async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const result = await substackService.refreshSessionAuth(sessionId);
+
+    if (result.success) {
+      res.json(
+        createSuccessResponse(result, "Session authentication refreshed")
+      );
+    } else {
+      res.status(500).json(
+        createErrorResponse("Failed to refresh session authentication", {
+          error: result.error,
+        })
+      );
+    }
+  } catch (error) {
+    res.status(500).json(
+      createErrorResponse("Failed to refresh session authentication", {
+        error: error.message,
+      })
+    );
+  }
+});
+
 module.exports = router;

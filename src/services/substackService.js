@@ -666,41 +666,118 @@ async function getUserData(driver) {
         }
       }
 
-      // Try to get user's subdomain
+      // Try to get user's subdomain with improved detection
       try {
-        // First try to navigate to the dashboard to get subdomain
         console.log("🔍 Trying to get user's subdomain...");
-        await driver.get("https://substack.com/dashboard");
-        await driver.sleep(3000);
+        let foundSubdomain = false;
 
-        const currentUrl = await driver.getCurrentUrl();
-        console.log(`📍 Dashboard URL: ${currentUrl}`);
+        // Method 1: Check if user has a publication by looking for "Start writing" vs "New post" button
+        try {
+          await driver.get("https://substack.com/home");
+          await driver.sleep(3000);
 
-        // Look for links or redirects that contain the subdomain
-        if (currentUrl.includes(".substack.com")) {
-          const match = currentUrl.match(/https:\/\/([^.]+)\.substack\.com/);
-          if (match) {
-            userData.subdomain = match[1];
-            console.log(`✅ Found subdomain: ${userData.subdomain}`);
+          // Look for existing publications in the user's profile
+          const pageSource = await driver.getPageSource();
+
+          // Check for publication data in JSON scripts
+          const scriptMatches = pageSource.match(
+            /<script[^>]*>.*?"publications":\s*\[(.*?)\]/s
+          );
+          if (scriptMatches) {
+            console.log("📝 Found publications data in page source");
+
+            // Extract publication subdomains from the JSON data
+            const publicationMatches = scriptMatches[1].match(
+              /"subdomain":\s*"([^"]+)"/g
+            );
+            if (publicationMatches) {
+              for (const match of publicationMatches) {
+                const subdomainMatch = match.match(/"subdomain":\s*"([^"]+)"/);
+                if (
+                  subdomainMatch &&
+                  subdomainMatch[1] !== "support" &&
+                  subdomainMatch[1] !== "www"
+                ) {
+                  userData.subdomain = subdomainMatch[1];
+                  console.log(
+                    `✅ Found subdomain from publications data: ${userData.subdomain}`
+                  );
+                  foundSubdomain = true;
+                  break;
+                }
+              }
+            }
           }
+
+          // Alternative: Look for publication cards/links on the home page
+          if (!foundSubdomain) {
+            const publicationLinks = await driver.findElements(
+              By.css(
+                'a[href*=".substack.com"]:not([href*="support.substack.com"]):not([href*="www.substack.com"])'
+              )
+            );
+
+            for (const link of publicationLinks) {
+              try {
+                const href = await link.getAttribute("href");
+                const linkText = await link
+                  .getText()
+                  .then((text) => text.toLowerCase());
+
+                // Look for links that seem to be user publications (not generic Substack links)
+                if (
+                  href &&
+                  (linkText.includes("write") ||
+                    linkText.includes("dashboard") ||
+                    linkText.includes("publish"))
+                ) {
+                  const match = href.match(/https:\/\/([^.]+)\.substack\.com/);
+                  if (
+                    match &&
+                    match[1] !== "www" &&
+                    match[1] !== "support" &&
+                    match[1] !== "help"
+                  ) {
+                    userData.subdomain = match[1];
+                    console.log(
+                      `✅ Found subdomain from publication link: ${userData.subdomain}`
+                    );
+                    foundSubdomain = true;
+                    break;
+                  }
+                }
+              } catch (e) {
+                continue;
+              }
+            }
+          }
+        } catch (e) {
+          console.log("Could not find subdomain from home page");
         }
 
-        // If no subdomain found in URL, try to find it in page content
-        if (!userData.subdomain) {
+        // Method 2: Try the publications/dashboard page
+        if (!foundSubdomain) {
           try {
-            // Look for publication links in the page
-            const links = await driver.findElements(
-              By.css('a[href*=".substack.com"]')
+            await driver.get("https://substack.com/publications");
+            await driver.sleep(3000);
+
+            // Look for "Write" buttons or publication management links
+            const writeLinks = await driver.findElements(
+              By.css(
+                'a[href*=".substack.com/publish"], a[href*="/publish/home"]'
+              )
             );
-            for (const link of links) {
+
+            for (const link of writeLinks) {
               try {
                 const href = await link.getAttribute("href");
                 const match = href.match(/https:\/\/([^.]+)\.substack\.com/);
-                if (match && match[1] !== "www") {
+                if (match && match[1] !== "www" && match[1] !== "support") {
                   userData.subdomain = match[1];
                   console.log(
-                    `✅ Found subdomain from link: ${userData.subdomain}`
+                    `✅ Found subdomain from publications page: ${userData.subdomain}`
                   );
+                  foundSubdomain = true;
                   break;
                 }
               } catch (e) {
@@ -708,23 +785,69 @@ async function getUserData(driver) {
               }
             }
           } catch (e) {
-            console.log("Could not extract subdomain from page links");
+            console.log("Could not access publications page");
           }
         }
 
-        // If still no subdomain, try to get it from the page source
-        if (!userData.subdomain) {
+        // Method 3: Try to find subdomain from cookies/localStorage that might contain publication info
+        if (!foundSubdomain) {
           try {
-            const pageSource = await driver.getPageSource();
-            const match = pageSource.match(/https:\/\/([^.]+)\.substack\.com/);
-            if (match && match[1] !== "www") {
-              userData.subdomain = match[1];
-              console.log(
-                `✅ Found subdomain from page source: ${userData.subdomain}`
-              );
+            // Check localStorage for publication data
+            const localStorageData = await driver.executeScript(() => {
+              const data = {};
+              for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                const value = localStorage.getItem(key);
+                if (
+                  value &&
+                  (value.includes(".substack.com") ||
+                    key.includes("publication"))
+                ) {
+                  data[key] = value;
+                }
+              }
+              return data;
+            });
+
+            for (const [key, value] of Object.entries(localStorageData)) {
+              const match = value.match(/https:\/\/([^.]+)\.substack\.com/);
+              if (match && match[1] !== "www" && match[1] !== "support") {
+                userData.subdomain = match[1];
+                console.log(
+                  `✅ Found subdomain from localStorage: ${userData.subdomain}`
+                );
+                foundSubdomain = true;
+                break;
+              }
             }
           } catch (e) {
-            console.log("Could not extract subdomain from page source");
+            console.log("Could not extract subdomain from localStorage");
+          }
+        }
+
+        // Method 4: Manual fallback - ask user to create a publication if none exists
+        if (!foundSubdomain) {
+          console.log(
+            "⚠️ No publication subdomain found - user may need to create a publication first"
+          );
+
+          // Try to detect if user has any publications at all
+          try {
+            await driver.get("https://substack.com/home");
+            await driver.sleep(2000);
+
+            const pageText = await driver
+              .findElement(By.tagName("body"))
+              .getText();
+            if (
+              pageText.includes("Start writing") ||
+              pageText.includes("Create your Substack")
+            ) {
+              console.log("📝 User appears to have no publications yet");
+              userData.needsPublication = true;
+            }
+          } catch (e) {
+            console.log("Could not determine publication status");
           }
         }
       } catch (error) {
@@ -886,8 +1009,8 @@ async function closeSession(sessionId, keepPersistent = false) {
  * @param {number} maxPersistentAge - Maximum age for persistent sessions in milliseconds (default: 7 days)
  */
 async function cleanupOldSessions(
-  maxAge = 2 * 60 * 60 * 1000,
-  maxPersistentAge = 7 * 24 * 60 * 60 * 1000
+  maxAge = 7 * 24 * 60 * 60 * 1000, // 7 days for active sessions
+  maxPersistentAge = 90 * 24 * 60 * 60 * 1000 // 90 days for persistent sessions
 ) {
   const now = Date.now();
   let cleanedActive = 0;
@@ -1225,27 +1348,131 @@ async function reconnectSession(sessionId) {
 
     // Navigate to Substack and restore authentication
     await driver.get("https://substack.com");
+    await driver.sleep(2000);
 
-    // Restore cookies if available
+    // Restore cookies if available with improved error handling
     if (persistentSession.userData?.authTokens?.cookies) {
-      for (const [name, value] of Object.entries(
+      console.log(
+        `🔐 Restoring ${
+          Object.keys(persistentSession.userData.authTokens.cookies).length
+        } authentication cookies...`
+      );
+
+      for (const [name, cookieData] of Object.entries(
         persistentSession.userData.authTokens.cookies
       )) {
         try {
-          await driver.manage().addCookie({
-            name,
-            value,
-            domain: ".substack.com",
-          });
+          // Handle both old format (string value) and new format (object with metadata)
+          const cookieValue =
+            typeof cookieData === "string" ? cookieData : cookieData.value;
+          const cookieDomain =
+            typeof cookieData === "object" && cookieData.domain
+              ? cookieData.domain
+              : ".substack.com";
+          const cookiePath =
+            typeof cookieData === "object" && cookieData.path
+              ? cookieData.path
+              : "/";
+
+          // Try different domain variations for better compatibility
+          const domains = [cookieDomain, ".substack.com", "substack.com"];
+          let cookieSet = false;
+
+          for (const domain of domains) {
+            try {
+              const cookieObj = {
+                name,
+                value: cookieValue,
+                domain,
+                path: cookiePath,
+              };
+
+              // Add additional cookie properties if available
+              if (typeof cookieData === "object") {
+                if (cookieData.secure !== undefined)
+                  cookieObj.secure = cookieData.secure;
+                if (cookieData.httpOnly !== undefined)
+                  cookieObj.httpOnly = cookieData.httpOnly;
+                if (cookieData.sameSite !== undefined)
+                  cookieObj.sameSite = cookieData.sameSite;
+
+                // Extend expiry time for better persistence
+                if (cookieData.expiry) {
+                  const now = Math.floor(Date.now() / 1000);
+                  const originalExpiry = cookieData.expiry;
+                  // Extend expiry by 30 days if it's expired or expiring soon
+                  if (originalExpiry < now + 86400) {
+                    // Less than 1 day left
+                    cookieObj.expiry = now + 30 * 24 * 60 * 60; // 30 days from now
+                  } else {
+                    cookieObj.expiry = originalExpiry;
+                  }
+                }
+              }
+
+              await driver.manage().addCookie(cookieObj);
+              cookieSet = true;
+              break;
+            } catch (domainError) {
+              // Try next domain
+              continue;
+            }
+          }
+
+          if (!cookieSet) {
+            console.log(`⚠️ Could not restore cookie ${name} on any domain`);
+          } else {
+            console.log(`✅ Restored cookie: ${name}`);
+          }
         } catch (error) {
-          console.log(`Could not restore cookie ${name}:`, error.message);
+          console.log(`❌ Failed to restore cookie ${name}:`, error.message);
         }
       }
     }
 
-    // Refresh to apply cookies
+    // Restore localStorage if available
+    if (persistentSession.userData?.authTokens?.localStorage) {
+      try {
+        console.log(`🔐 Restoring localStorage items...`);
+        for (const [key, value] of Object.entries(
+          persistentSession.userData.authTokens.localStorage
+        )) {
+          await driver.executeScript(
+            `localStorage.setItem(arguments[0], arguments[1]);`,
+            key,
+            value
+          );
+        }
+      } catch (error) {
+        console.log(`⚠️ Could not restore localStorage:`, error.message);
+      }
+    }
+
+    // Refresh to apply cookies and localStorage
     await driver.navigate().refresh();
-    await driver.sleep(2000);
+    await driver.sleep(3000);
+
+    // Verify authentication by checking if we're still logged in
+    try {
+      const currentUrl = await driver.getCurrentUrl();
+      console.log(`🔍 Current URL after cookie restoration: ${currentUrl}`);
+
+      // Try to navigate to a protected page to verify authentication
+      await driver.get("https://substack.com/home");
+      await driver.sleep(3000);
+
+      const homeUrl = await driver.getCurrentUrl();
+      if (homeUrl.includes("sign-in") || homeUrl.includes("login")) {
+        console.log(
+          `⚠️ Authentication verification failed - redirected to login`
+        );
+        // Don't throw error here, let the session be created but mark for re-auth
+      } else {
+        console.log(`✅ Authentication verified successfully`);
+      }
+    } catch (verifyError) {
+      console.log(`⚠️ Could not verify authentication:`, verifyError.message);
+    }
 
     // Create new active session
     const reconnectedSession = {
@@ -1277,6 +1504,182 @@ async function reconnectSession(sessionId) {
   } catch (error) {
     console.error("Error reconnecting session:", error);
     throw new Error(`Failed to reconnect session: ${error.message}`);
+  }
+}
+
+/**
+ * Refresh authentication tokens for an active session to prevent expiration
+ * @param {string} sessionId - Session ID to refresh
+ * @returns {Promise<Object>} Refresh result
+ */
+async function refreshSessionAuth(sessionId) {
+  try {
+    const session = activeSessions.get(sessionId);
+    if (!session) {
+      throw new Error("Session not found in active sessions");
+    }
+
+    const { driver } = session;
+    console.log(`🔄 Refreshing authentication for session: ${sessionId}`);
+
+    // Navigate to a safe page to refresh tokens
+    await driver.get("https://substack.com/home");
+    await driver.sleep(2000);
+
+    // Extract fresh authentication tokens
+    const freshAuthTokens = await extractAuthTokens(driver);
+
+    // Update session userData with fresh tokens
+    if (session.userData) {
+      session.userData.authTokens = freshAuthTokens;
+      session.userData.lastRefresh = new Date().toISOString();
+    }
+
+    // Update persistent storage with fresh tokens
+    await sessionStore.saveSession(sessionId, {
+      ...session,
+      userData: session.userData,
+      authTokens: freshAuthTokens,
+    });
+
+    console.log(`✅ Authentication refreshed for session: ${sessionId}`);
+    return {
+      success: true,
+      message: "Authentication tokens refreshed successfully",
+      refreshedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    console.error(`Error refreshing session auth:`, error);
+    return {
+      success: false,
+      message: "Failed to refresh authentication tokens",
+      error: error.message,
+    };
+  }
+}
+
+/**
+ * Check if session needs authentication refresh based on age and activity
+ * @param {Object} session - Session object
+ * @returns {boolean} True if refresh is needed
+ */
+function shouldRefreshAuth(session) {
+  if (!session.userData?.authTokens?.extractedAt) {
+    return true; // No auth tokens or no extraction date
+  }
+
+  const extractedAt = new Date(session.userData.authTokens.extractedAt);
+  const now = new Date();
+  const hoursSinceExtraction = (now - extractedAt) / (1000 * 60 * 60);
+
+  // Refresh if tokens are older than 12 hours
+  return hoursSinceExtraction > 12;
+}
+
+/**
+ * Helper function to find and interact with Substack editor
+ * @param {WebDriver} driver - Selenium WebDriver instance
+ * @param {string} title - Post title
+ * @param {string} content - Post content
+ * @returns {Promise<boolean>} True if editor was found and content filled
+ */
+async function tryToFindEditor(driver, title, content) {
+  try {
+    // Step 2: Look for and click the "New post" button
+    console.log(`🔍 Looking for "New post" button...`);
+    try {
+      const newPostButton = await driver.findElement(
+        By.xpath(
+          '//button[contains(text(), "New post")] | //a[contains(text(), "New post")]'
+        )
+      );
+
+      console.log(`🖱️ Found "New post" button, clicking...`);
+      await newPostButton.click();
+      await driver.sleep(2000); // Wait for dropdown to appear
+
+      // Step 3: Look for and click "Text post" in the dropdown
+      console.log(`🔍 Looking for "Text post" option in dropdown...`);
+      const textPostOption = await driver.findElement(
+        By.xpath(
+          '//button[contains(text(), "Text post")] | //a[contains(text(), "Text post")] | //*[contains(text(), "Text post")]'
+        )
+      );
+
+      console.log(`🖱️ Found "Text post" option, clicking...`);
+      await textPostOption.click();
+      await driver.sleep(5000); // Give time for navigation to specific post URL
+
+      // Check where we ended up after clicking
+      const currentUrl = await driver.getCurrentUrl();
+      console.log(`📍 After clicking Text post: ${currentUrl}`);
+
+      // Should now be on a specific post editor like /publish/post/123456
+      if (
+        currentUrl.includes("/publish/post/") &&
+        currentUrl.match(/\/publish\/post\/\d+/)
+      ) {
+        console.log(`🎯 Successfully navigated to post editor: ${currentUrl}`);
+
+        // Try to fill in the title and content
+        return await fillPostContent(driver, title, content);
+      }
+    } catch (error) {
+      console.log(
+        `❌ Could not find or click New post/Text post: ${error.message}`
+      );
+      return false;
+    }
+  } catch (error) {
+    console.log(`❌ Error in tryToFindEditor: ${error.message}`);
+    return false;
+  }
+
+  return false;
+}
+
+/**
+ * Helper function to fill post content in the editor
+ * @param {WebDriver} driver - Selenium WebDriver instance
+ * @param {string} title - Post title
+ * @param {string} content - Post content
+ * @returns {Promise<boolean>} True if content was successfully filled
+ */
+async function fillPostContent(driver, title, content) {
+  try {
+    // Wait for editor to load and fill in title
+    console.log(`📝 Filling in post title: "${title}"`);
+    const titleInput = await driver.wait(
+      until.elementLocated(
+        By.css(
+          'textarea[data-testid="post-title"], input[placeholder*="Title"]'
+        )
+      ),
+      10000
+    );
+
+    await titleInput.clear();
+    await titleInput.sendKeys(title);
+    console.log(`✅ Title entered: "${title}"`);
+
+    // Fill in content
+    console.log(`📝 Filling in post content...`);
+    const contentEditor = await driver.wait(
+      until.elementLocated(
+        By.css('div[data-testid="editor"], div[contenteditable="true"]')
+      ),
+      10000
+    );
+
+    await contentEditor.click();
+    await contentEditor.clear();
+    await contentEditor.sendKeys(content);
+    console.log(`✅ Content entered (${content.length} characters)`);
+
+    return true;
+  } catch (error) {
+    console.log(`❌ Error filling post content: ${error.message}`);
+    return false;
   }
 }
 
@@ -1317,6 +1720,21 @@ async function createPost(sessionId, postData) {
       );
     }
 
+    // Check if authentication needs refresh to prevent login issues
+    if (shouldRefreshAuth(session)) {
+      console.log(`🔄 Session authentication is stale, refreshing...`);
+      try {
+        await refreshSessionAuth(sessionId);
+        // Get updated session after refresh
+        session = activeSessions.get(sessionId);
+      } catch (refreshError) {
+        console.log(
+          `⚠️ Could not refresh auth, continuing with existing tokens:`,
+          refreshError.message
+        );
+      }
+    }
+
     const { driver } = session;
     const {
       title,
@@ -1333,95 +1751,335 @@ async function createPost(sessionId, postData) {
     console.log(`📝 Creating Substack post: "${title}"`);
 
     // Get user's subdomain from session data or parameter
-    const userSubdomain = subdomain || session.userData?.subdomain;
+    let userSubdomain = subdomain || session.userData?.subdomain;
     console.log(`🔍 User subdomain: ${userSubdomain}`);
 
-    // Build URLs based on user's subdomain
-    const writeUrls = [];
-
-    if (userSubdomain) {
-      // Use user-specific subdomain URLs first
-      writeUrls.push(
-        `https://${userSubdomain}.substack.com/publish`,
-        `https://${userSubdomain}.substack.com/publish/post`,
-        `https://${userSubdomain}.substack.com/publish/posts/new`
+    // If no subdomain found, try to auto-detect it
+    if (!userSubdomain) {
+      console.log(
+        `⚠️ No subdomain found for user. Attempting auto-detection...`
       );
+
+      try {
+        // Navigate to Substack home to check user's publication status
+        await driver.get("https://substack.com/home");
+        await driver.sleep(3000);
+
+        const pageText = await driver.findElement(By.tagName("body")).getText();
+
+        if (
+          pageText.includes("Start writing") ||
+          pageText.includes("Create your Substack")
+        ) {
+          throw new Error(
+            "User has no Substack publication yet. Please create a publication first by visiting https://substack.com and clicking 'Start writing'."
+          );
+        } else {
+          // User has publications but we couldn't detect the subdomain
+          // Try to extract it from the page with multiple approaches
+          const pageSource = await driver.getPageSource();
+
+          // Method 1: Look for publication data in JSON
+          const publicationDataMatch = pageSource.match(
+            /"publications":\s*\[([^\]]+)\]/
+          );
+          if (publicationDataMatch) {
+            try {
+              const publicationsText = publicationDataMatch[1];
+              const subdomainMatch = publicationsText.match(
+                /"subdomain":"([^"]+)"/
+              );
+              if (subdomainMatch) {
+                userSubdomain = subdomainMatch[1];
+                console.log(
+                  `🔍 Auto-detected subdomain from publications data: ${userSubdomain}`
+                );
+              }
+            } catch (e) {
+              console.log("Could not parse publications data");
+            }
+          }
+
+          // Method 2: Look for user's own publication links (if method 1 failed)
+          if (!userSubdomain) {
+            const allSubdomainMatches = pageSource.match(
+              /https:\/\/([a-zA-Z0-9-]+)\.substack\.com/g
+            );
+
+            if (allSubdomainMatches) {
+              // Filter out common non-user subdomains and find the most likely user subdomain
+              const filteredSubdomains = allSubdomainMatches
+                .map(
+                  (url) =>
+                    url.match(/https:\/\/([a-zA-Z0-9-]+)\.substack\.com/)[1]
+                )
+                .filter(
+                  (sub) =>
+                    ![
+                      "www",
+                      "support",
+                      "help",
+                      "blog",
+                      "newsletter",
+                      "substack",
+                      "app",
+                      "api",
+                      "cdn",
+                      "static",
+                    ].includes(sub)
+                )
+                .filter((sub, index, arr) => arr.indexOf(sub) === index); // Remove duplicates
+
+              // Try to find the user's own subdomain by looking for publish links
+              const userSubdomainCandidate = filteredSubdomains.find(
+                (sub) =>
+                  pageSource.includes(`${sub}.substack.com/publish`) ||
+                  pageSource.includes(`"subdomain":"${sub}"`)
+              );
+
+              if (userSubdomainCandidate) {
+                userSubdomain = userSubdomainCandidate;
+                console.log(
+                  `🔍 Auto-detected user's own subdomain: ${userSubdomain}`
+                );
+              } else if (filteredSubdomains.length > 0) {
+                userSubdomain = filteredSubdomains[0]; // Fallback to first unique subdomain
+                console.log(
+                  `🔍 Auto-detected subdomain (fallback): ${userSubdomain}`
+                );
+              }
+            }
+          }
+
+          if (userSubdomain) {
+            // Update session with the detected subdomain
+            if (session.userData) {
+              session.userData.subdomain = userSubdomain;
+              await sessionStore.saveSession(sessionId, session);
+              console.log(
+                `💾 Saved detected subdomain to session: ${userSubdomain}`
+              );
+            }
+          }
+
+          if (!userSubdomain) {
+            throw new Error(
+              "Could not determine user's publication subdomain. Please ensure you have created a Substack publication and try again."
+            );
+          }
+        }
+      } catch (error) {
+        if (error.message.includes("User has no Substack publication")) {
+          throw error; // Re-throw the helpful error message
+        }
+        throw new Error(
+          `Could not determine publication status: ${error.message}`
+        );
+      }
     }
 
-    // Add generic fallback URLs
-    writeUrls.push(
-      "https://substack.com/publish",
-      "https://substack.com/publish/post",
-      "https://substack.com/publish/posts/new"
-    );
-
+    // Start from user's dashboard and create a new post
     let foundEditor = false;
     let currentUrl;
 
-    for (const url of writeUrls) {
-      try {
-        console.log(`🔗 Trying URL: ${url}`);
-        await driver.get(url);
+    // Now userSubdomain should be available (either provided or auto-detected)
+
+    try {
+      // Step 1: Navigate to user's publish dashboard
+      if (userSubdomain) {
+        const publishDashboardUrl = `https://${userSubdomain}.substack.com/publish/home?utm_source=menu`;
+        console.log(
+          `🏠 Navigating to publish dashboard: ${publishDashboardUrl}`
+        );
+        await driver.get(publishDashboardUrl);
         await driver.sleep(3000);
 
         currentUrl = await driver.getCurrentUrl();
-        console.log(`📍 Current URL: ${currentUrl}`);
+        console.log(`📍 Current URL after navigation: ${currentUrl}`);
 
         // Check if we're still logged in
         if (currentUrl.includes("sign-in") || currentUrl.includes("login")) {
           throw new Error("Session expired. Please log in again.");
         }
 
-        // Check if we can find a title input on this page
+        // Step 2: Look for and click the "New post" button
+        console.log(`🔍 Looking for "New post" button...`);
+        try {
+          const newPostButton = await driver.findElement(
+            By.xpath(
+              '//button[contains(text(), "New post")] | //a[contains(text(), "New post")]'
+            )
+          );
+
+          console.log(`🖱️ Found "New post" button, clicking...`);
+          await newPostButton.click();
+          await driver.sleep(2000); // Wait for dropdown to appear
+
+          // Step 3: Look for and click "Text post" in the dropdown
+          console.log(`🔍 Looking for "Text post" option in dropdown...`);
+          const textPostOption = await driver.findElement(
+            By.xpath(
+              '//button[contains(text(), "Text post")] | //a[contains(text(), "Text post")] | //*[contains(text(), "Text post")]'
+            )
+          );
+
+          console.log(`🖱️ Found "Text post" option, clicking...`);
+          await textPostOption.click();
+          await driver.sleep(3000); // Give time for navigation to specific post URL
+
+          // Check for any alert that might appear after clicking
+          try {
+            const alert = await driver.switchTo().alert();
+            const alertText = await alert.getText();
+            console.log(`⚠️ Alert after clicking Text post: "${alertText}"`);
+            await alert.accept();
+            console.log(`✅ Alert dismissed, refreshing page...`);
+            await driver.navigate().refresh();
+            await driver.sleep(3000);
+          } catch (error) {
+            // No alert, continue normally
+          }
+
+          // Check where we ended up after clicking
+          currentUrl = await driver.getCurrentUrl();
+          console.log(`📍 After clicking Text post: ${currentUrl}`);
+
+          // Should now be on a post editor (either /publish/post/123456 or /publish/post?type=newsletter)
+          if (
+            currentUrl.includes("/publish/post") &&
+            (currentUrl.match(/\/publish\/post\/\d+/) ||
+              currentUrl.includes("type=newsletter"))
+          ) {
+            console.log(
+              `🎯 Successfully navigated to post editor: ${currentUrl}`
+            );
+            foundEditor = true;
+          } else {
+            console.log(
+              `❌ Unexpected URL after clicking Text post: ${currentUrl}`
+            );
+          }
+        } catch (error) {
+          console.log(
+            `❌ Could not find or click New post/Text post: ${error.message}`
+          );
+        }
+      }
+
+      // Step 4: If not on editor yet after clicking Post button, wait for page to load
+      if (!foundEditor) {
+        console.log(`⏳ Waiting for editor to load...`);
         try {
           await driver.wait(
             until.elementLocated(
               By.css(
-                'input[placeholder*="Title"], input[data-testid="title-input"], .title-input, input[name="title"]'
+                'textarea[data-testid="post-title"], textarea[id="post-title"], textarea[placeholder="Title"], h1[contenteditable], div[contenteditable], input[placeholder*="Title"], input[data-testid="title-input"], .title-input, input[name="title"]'
               )
             ),
-            5000
+            15000
           );
           foundEditor = true;
-          console.log(`✅ Found editor at: ${url}`);
-          break;
+          console.log(`✅ Found editor after waiting`);
         } catch (error) {
-          console.log(`❌ No editor found at: ${url}`);
-          continue;
+          console.log(
+            `❌ Editor still not found after waiting: ${error.message}`
+          );
         }
-      } catch (error) {
-        console.log(`❌ Failed to load: ${url} - ${error.message}`);
-        continue;
       }
+    } catch (error) {
+      console.log(`❌ Error in navigation process: ${error.message}`);
     }
 
     if (!foundEditor) {
-      // Try to find a "Write" or "New post" button on the current page
-      console.log(`🔍 Looking for write/new post button on current page...`);
-      try {
-        const writeButton = await driver.findElement(
-          By.xpath(
-            '//a[contains(text(), "Write") or contains(text(), "New post") or contains(text(), "Create")] | //button[contains(text(), "Write") or contains(text(), "New post") or contains(text(), "Create")]'
-          )
-        );
-        await writeButton.click();
-        await driver.sleep(3000);
+      // Try alternative navigation approaches
+      console.log(`🔍 Trying alternative navigation approaches...`);
 
-        // Try to find title input after clicking
-        await driver.wait(
-          until.elementLocated(
-            By.css(
-              'input[placeholder*="Title"], input[data-testid="title-input"], .title-input, input[name="title"]'
-            )
-          ),
-          10000
-        );
-        foundEditor = true;
-        console.log(`✅ Found editor after clicking write button`);
+      // Approach 1: Try direct navigation to /publish
+      try {
+        if (userSubdomain) {
+          const directPublishUrl = `https://${userSubdomain}.substack.com/publish`;
+          console.log(`🏠 Trying direct publish URL: ${directPublishUrl}`);
+          await driver.get(directPublishUrl);
+          await driver.sleep(3000);
+
+          currentUrl = await driver.getCurrentUrl();
+          console.log(`📍 After direct publish navigation: ${currentUrl}`);
+
+          // Check if we have editor elements
+          const editorFound = await tryToFindEditor(driver, title, content);
+          if (editorFound) {
+            foundEditor = true;
+            console.log(`✅ Found editor via direct publish URL`);
+          }
+        }
       } catch (error) {
-        console.log(
-          `❌ Could not find write button or editor: ${error.message}`
-        );
+        console.log(`❌ Direct publish URL failed: ${error.message}`);
+      }
+
+      // Approach 2: Try user dashboard with write button
+      if (!foundEditor) {
+        try {
+          if (userSubdomain) {
+            console.log(
+              `🏠 Navigating to user dashboard: https://${userSubdomain}.substack.com`
+            );
+            await driver.get(`https://${userSubdomain}.substack.com`);
+            await driver.sleep(3000);
+          }
+
+          // Look for "Write" or "New post" button with more selectors
+          const writeSelectors = [
+            '//a[contains(text(), "Write")]',
+            '//button[contains(text(), "Write")]',
+            '//a[contains(text(), "New post")]',
+            '//button[contains(text(), "New post")]',
+            '//a[contains(@href, "publish")]',
+            '//button[contains(@href, "publish")]',
+            '//a[contains(text(), "Create")]',
+            '//button[contains(text(), "Create")]',
+            ".write-button",
+            '[data-testid="write-button"]',
+            '[data-testid="new-post-button"]',
+          ];
+
+          let writeButton = null;
+          for (const selector of writeSelectors) {
+            try {
+              if (selector.startsWith("//")) {
+                writeButton = await driver.findElement(By.xpath(selector));
+              } else {
+                writeButton = await driver.findElement(By.css(selector));
+              }
+              console.log(`✅ Found write button with selector: ${selector}`);
+              break;
+            } catch (e) {
+              console.log(
+                `Write selector "${selector}" not found, trying next...`
+              );
+            }
+          }
+
+          if (writeButton) {
+            console.log(`🖱️ Clicking write button...`);
+            await writeButton.click();
+            await driver.sleep(5000); // Give more time for page to load
+
+            // Check where we ended up
+            const newUrl = await driver.getCurrentUrl();
+            console.log(`📍 After clicking write button: ${newUrl}`);
+
+            // Try to find editor
+            const editorFound = await tryToFindEditor(driver, title, content);
+            if (editorFound) {
+              foundEditor = true;
+              console.log(`✅ Found editor after clicking write button`);
+            }
+          }
+        } catch (error) {
+          console.log(
+            `❌ Could not find write button or editor: ${error.message}`
+          );
+        }
       }
     }
 
@@ -1432,6 +2090,12 @@ async function createPost(sessionId, postData) {
       console.log(`📄 Page title: ${pageTitle}`);
       console.log(`📄 Current URL: ${await driver.getCurrentUrl()}`);
       console.log(`📄 Page source length: ${pageSource.length}`);
+
+      // If page source is very short, it might be a redirect or error page
+      if (pageSource.length < 1000) {
+        console.log(`📄 Page source (short page detected):`);
+        console.log(pageSource.substring(0, 500));
+      }
 
       // Look for any input fields on the page
       const inputs = await driver.findElements(By.css("input"));
@@ -1455,31 +2119,103 @@ async function createPost(sessionId, postData) {
       );
     }
 
+    // Wait for the page to fully load before looking for title input
+    console.log("⏳ Waiting for page to fully load...");
+    await driver.sleep(5000);
+
     // Find and fill the title input
     let titleInput;
     const titleSelectors = [
+      'textarea[data-testid="post-title"]', // Exact match from DOM
+      'textarea[id="post-title"]', // Backup by ID
+      'textarea[placeholder="Title"]', // Backup by placeholder
+      'textarea[placeholder*="title"]', // Case insensitive
+      'h1[contenteditable="true"]', // Substack often uses contenteditable h1 for titles
+      'div[contenteditable="true"]', // Or contenteditable divs
+      '[contenteditable="true"]', // Any contenteditable element
       'input[placeholder*="Title"]',
+      'input[placeholder*="title"]', // Case insensitive
       'input[data-testid="title-input"]',
       ".title-input input",
       'input[name="title"]',
       ".editor-title input",
+      // More generic selectors
+      "textarea",
+      'input[type="text"]',
+      ".post-title",
+      '[data-testid*="title"]',
     ];
 
-    for (const selector of titleSelectors) {
-      try {
-        titleInput = await driver.findElement(By.css(selector));
-        break;
-      } catch (error) {
-        console.log(`Title selector "${selector}" not found, trying next...`);
+    // Try waiting for specific elements first
+    try {
+      console.log("🔍 Waiting for title input to appear...");
+      titleInput = await driver.wait(
+        until.elementLocated(
+          By.css(
+            'textarea[data-testid="post-title"], textarea[placeholder*="title"], textarea[placeholder*="Title"], h1[contenteditable="true"], input[placeholder*="Title"]'
+          )
+        ),
+        10000
+      );
+      console.log("✅ Title input found via wait");
+    } catch (waitError) {
+      console.log("⚠️ Wait for title input failed, trying manual search...");
+
+      for (const selector of titleSelectors) {
+        try {
+          titleInput = await driver.findElement(By.css(selector));
+          console.log(`✅ Found title input with selector: ${selector}`);
+          break;
+        } catch (error) {
+          console.log(`Title selector "${selector}" not found, trying next...`);
+        }
       }
     }
 
     if (!titleInput) {
+      // Debug: show what's actually on the page
+      console.log("🔍 Title input not found, debugging page content...");
+      const pageSource = await driver.getPageSource();
+      console.log(`📄 Page source length: ${pageSource.length}`);
+
+      // Look for any input or textarea elements
+      const allInputs = await driver.findElements(By.css("input, textarea"));
+      console.log(`🔍 Found ${allInputs.length} input/textarea elements`);
+
+      for (let i = 0; i < Math.min(allInputs.length, 5); i++) {
+        try {
+          const element = allInputs[i];
+          const tagName = await element.getTagName();
+          const placeholder = await element.getAttribute("placeholder");
+          const id = await element.getAttribute("id");
+          const dataTestId = await element.getAttribute("data-testid");
+          const className = await element.getAttribute("class");
+
+          console.log(
+            `Input ${i}: ${tagName}, placeholder="${placeholder}", id="${id}", data-testid="${dataTestId}", class="${className}"`
+          );
+        } catch (e) {
+          console.log(`Input ${i}: Could not get attributes`);
+        }
+      }
+
       throw new Error("Could not find title input field");
     }
 
-    await titleInput.clear();
-    await titleInput.sendKeys(title);
+    // Check if it's a contenteditable element or regular input
+    const isContentEditable = await titleInput.getAttribute("contenteditable");
+
+    if (isContentEditable === "true") {
+      // For contenteditable elements, clear and set innerHTML
+      await driver.executeScript("arguments[0].innerHTML = '';", titleInput);
+      await titleInput.click();
+      await titleInput.sendKeys(title);
+    } else {
+      // For regular inputs, use clear and sendKeys
+      await titleInput.clear();
+      await titleInput.sendKeys(title);
+    }
+
     console.log(`✅ Title entered: "${title}"`);
 
     // Find and fill subtitle if provided
@@ -1501,6 +2237,8 @@ async function createPost(sessionId, postData) {
     // Find and fill the content editor
     let contentEditor;
     const contentSelectors = [
+      'div[data-testid="editor"]', // Exact match from DOM
+      ".tiptap.ProseMirror", // Combined class from DOM
       ".ProseMirror",
       '[data-testid="editor-content"]',
       ".editor-content",
@@ -1530,24 +2268,86 @@ async function createPost(sessionId, postData) {
     // Wait a moment for the content to be processed
     await driver.sleep(2000);
 
-    // Find and click the publish/save button
+    // First, look for "Continue" button to go to publish settings
+    let continueButton;
+    try {
+      // Try multiple selectors for the Continue button
+      const continueSelectors = [
+        'button[data-testid="publish-button"]', // From DOM structure
+        '//button[contains(text(), "Continue")]',
+        '//button[normalize-space(text())="Continue"]',
+        '//button[contains(text(), "Next")]',
+        '//button[contains(text(), "Publish")]',
+        'button[title="Continue"]',
+        'button[type="submit"]',
+        // Sometimes the button might be in a form
+        'form button[type="submit"]',
+        'button[class*="primary"]',
+        'button[class*="continue"]',
+      ];
+
+      for (const selector of continueSelectors) {
+        try {
+          if (selector.startsWith("//")) {
+            continueButton = await driver.findElement(By.xpath(selector));
+          } else {
+            continueButton = await driver.findElement(By.css(selector));
+          }
+          console.log(`✅ Found Continue button with selector: ${selector}`);
+          break;
+        } catch (e) {
+          console.log(
+            `Continue selector "${selector}" not found, trying next...`
+          );
+        }
+      }
+
+      if (continueButton) {
+        await continueButton.click();
+        console.log(`✅ Clicked Continue button`);
+        await driver.sleep(3000); // Wait for publish settings page to load
+
+        // Now we're on the publish settings page
+        const publishUrl = await driver.getCurrentUrl();
+        console.log(`📍 Now on publish settings page: ${publishUrl}`);
+      } else {
+        throw new Error("Could not find Continue button with any selector");
+      }
+    } catch (error) {
+      console.log(`❌ Could not find Continue button: ${error.message}`);
+    }
+
+    // Find and click the final publish/save button
     let actionButton;
     const buttonSelectors = isDraft
       ? [
           'button[data-testid="save-draft"]',
           'button:contains("Save draft")',
           ".save-draft-button",
+          '//button[contains(text(), "Save as draft")]',
         ]
       : [
+          '//button[normalize-space(text())="Send to everyone now"]',
+          '//button[contains(text(), "Send to everyone now")]',
+          '//button[text()="Send to everyone now"]',
+          'button[type="submit"]', // Often the publish button is a submit button
+          '//button[normalize-space(text())="Publish now"]',
+          '//button[contains(text(), "Publish now")]',
           'button[data-testid="publish"]',
           'button:contains("Publish")',
           ".publish-button",
-          'button:contains("Continue")',
+          // Add more generic selectors for orange/primary buttons
+          'button[class*="primary"]',
+          'button[class*="orange"]',
+          'button[class*="submit"]',
         ];
 
     for (const selector of buttonSelectors) {
       try {
-        if (selector.includes(":contains(")) {
+        if (selector.startsWith("//")) {
+          // Use XPath for XPath selectors
+          actionButton = await driver.findElement(By.xpath(selector));
+        } else if (selector.includes(":contains(")) {
           // Use XPath for text-based selectors
           const text = selector.match(/:contains\("([^"]+)"\)/)[1];
           actionButton = await driver.findElement(
@@ -1556,6 +2356,7 @@ async function createPost(sessionId, postData) {
         } else {
           actionButton = await driver.findElement(By.css(selector));
         }
+        console.log(`✅ Found publish button with selector: ${selector}`);
         break;
       } catch (error) {
         console.log(`Button selector "${selector}" not found, trying next...`);
@@ -1564,22 +2365,40 @@ async function createPost(sessionId, postData) {
 
     if (!actionButton) {
       // Fallback: look for any button that might be the publish/save button
+      console.log(
+        "🔍 No button found with specific selectors, scanning all buttons..."
+      );
       const buttons = await driver.findElements(By.css("button"));
-      for (const button of buttons) {
+      console.log(`Found ${buttons.length} buttons on page`);
+
+      for (let i = 0; i < buttons.length; i++) {
         try {
+          const button = buttons[i];
           const buttonText = await button.getText();
+          const buttonClass = await button.getAttribute("class");
+          const buttonType = await button.getAttribute("type");
+
+          console.log(
+            `Button ${i}: text="${buttonText}", class="${buttonClass}", type="${buttonType}"`
+          );
+
           if (
             (isDraft &&
               (buttonText.toLowerCase().includes("save") ||
                 buttonText.toLowerCase().includes("draft"))) ||
             (!isDraft &&
-              (buttonText.toLowerCase().includes("publish") ||
+              (buttonText.toLowerCase().includes("send to everyone now") ||
+                buttonText.toLowerCase().includes("publish") ||
                 buttonText.toLowerCase().includes("continue")))
           ) {
             actionButton = button;
+            console.log(`✅ Found matching button: "${buttonText}"`);
             break;
           }
         } catch (error) {
+          console.log(
+            `Button ${i}: Could not get attributes - ${error.message}`
+          );
           continue;
         }
       }
@@ -1591,27 +2410,129 @@ async function createPost(sessionId, postData) {
       );
     }
 
-    // Click the action button
-    await actionButton.click();
-    console.log(`✅ Clicked ${isDraft ? "save draft" : "publish"} button`);
+    // Check for any alert dialogs first
+    try {
+      const alert = await driver.switchTo().alert();
+      const alertText = await alert.getText();
+      console.log(`⚠️ Alert detected: "${alertText}"`);
+      await alert.accept(); // Accept/dismiss the alert
+      console.log(`✅ Alert dismissed`);
+      await driver.sleep(2000);
+    } catch (error) {
+      // No alert present, continue normally
+    }
+
+    // Scroll to the button to make sure it's visible
+    await driver.executeScript(
+      "arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});",
+      actionButton
+    );
+    await driver.sleep(2000); // Wait for scroll to complete
+
+    // Try to make the button interactable
+    try {
+      // Wait for the button to be clickable
+      await driver.wait(until.elementIsEnabled(actionButton), 5000);
+      await driver.wait(until.elementIsVisible(actionButton), 5000);
+
+      // Try regular click first
+      await actionButton.click();
+      console.log(`✅ Clicked ${isDraft ? "save draft" : "publish"} button`);
+    } catch (clickError) {
+      console.log(
+        `⚠️ Regular click failed, trying JavaScript click: ${clickError.message}`
+      );
+      // Fallback to JavaScript click if regular click fails
+      await driver.executeScript("arguments[0].click();", actionButton);
+      console.log(
+        `✅ JavaScript clicked ${isDraft ? "save draft" : "publish"} button`
+      );
+    }
 
     // Wait for the action to complete
     await driver.sleep(3000);
 
-    // If publishing (not draft), there might be additional steps
+    // For publish actions, check if there's a subscribe buttons popup modal
     if (!isDraft) {
+      console.log(
+        "✅ Post publishing initiated, checking for subscribe buttons popup..."
+      );
+
       try {
-        // Look for final publish button or confirmation
-        const finalPublishButton = await driver.findElement(
+        // Look for the subscribe buttons popup modal
+        const modal = await driver.findElement(
           By.xpath(
-            '//button[contains(text(), "Publish now") or contains(text(), "Publish")]'
+            '//div[contains(text(), "Add subscribe buttons to your post")]'
           )
         );
-        await finalPublishButton.click();
-        console.log("✅ Final publish button clicked");
-        await driver.sleep(2000);
+        console.log("🔍 Found subscribe buttons popup modal");
+
+        // Look for "Publish without buttons" button
+        const publishWithoutButtonsSelectors = [
+          '//button[contains(text(), "Publish without buttons")]',
+          '//button[normalize-space(text())="Publish without buttons"]',
+          'button[data-testid="publish-without-buttons"]',
+        ];
+
+        let publishWithoutButtonsBtn = null;
+        for (const selector of publishWithoutButtonsSelectors) {
+          try {
+            publishWithoutButtonsBtn = await driver.findElement(
+              By.xpath(selector)
+            );
+            console.log(
+              `✅ Found "Publish without buttons" button with selector: ${selector}`
+            );
+            break;
+          } catch (e) {
+            console.log(`Selector "${selector}" not found, trying next...`);
+          }
+        }
+
+        if (publishWithoutButtonsBtn) {
+          await publishWithoutButtonsBtn.click();
+          console.log(
+            "✅ Clicked 'Publish without buttons' - post should now be published"
+          );
+          await driver.sleep(3000); // Wait for final publish to complete
+        } else {
+          console.log(
+            "⚠️ Could not find 'Publish without buttons' button, trying 'Add subscribe buttons'"
+          );
+
+          // Fallback: try clicking "Add subscribe buttons"
+          const addSubscribeButtonsSelectors = [
+            '//button[contains(text(), "Add subscribe buttons")]',
+            '//button[normalize-space(text())="Add subscribe buttons"]',
+            'button[data-testid="add-subscribe-buttons"]',
+          ];
+
+          let addSubscribeBtn = null;
+          for (const selector of addSubscribeButtonsSelectors) {
+            try {
+              addSubscribeBtn = await driver.findElement(By.xpath(selector));
+              console.log(
+                `✅ Found "Add subscribe buttons" button with selector: ${selector}`
+              );
+              break;
+            } catch (e) {
+              console.log(`Selector "${selector}" not found, trying next...`);
+            }
+          }
+
+          if (addSubscribeBtn) {
+            await addSubscribeBtn.click();
+            console.log(
+              "✅ Clicked 'Add subscribe buttons' - post should now be published"
+            );
+            await driver.sleep(3000);
+          }
+        }
       } catch (error) {
-        console.log("No final publish step required or button not found");
+        console.log(
+          "ℹ️ No subscribe buttons popup found, post may have published directly"
+        );
+        await driver.sleep(3000);
       }
     }
 
@@ -1654,8 +2575,127 @@ async function createPost(sessionId, postData) {
   }
 }
 
-// Cleanup old sessions every hour
-setInterval(cleanupOldSessions, 60 * 60 * 1000);
+/**
+ * Updates session status manually (useful for avoiding re-authentication)
+ * @param {string} sessionId - Browser session ID
+ * @param {Object} updatedSession - Updated session data
+ * @returns {Promise<boolean>} Success status
+ */
+async function updateSessionStatus(sessionId, updatedSession) {
+  try {
+    // Update persistent storage
+    await sessionStore.saveSession(sessionId, updatedSession);
+
+    // If there's an active session, update it too
+    const activeSession = activeSessions.get(sessionId);
+    if (activeSession) {
+      activeSession.status = updatedSession.status;
+      activeSession.userData = updatedSession.userData;
+    }
+
+    console.log(
+      `✅ Updated session ${sessionId} status to: ${updatedSession.status}`
+    );
+    return true;
+  } catch (error) {
+    console.error("Error updating session status:", error);
+    throw error;
+  }
+}
+
+// Cleanup old sessions every 24 hours (once per day)
+setInterval(cleanupOldSessions, 24 * 60 * 60 * 1000);
+
+/**
+ * Helper function to handle the publish process after content is filled
+ * @param {WebDriver} driver - Selenium WebDriver instance
+ * @param {string} title - Post title
+ * @param {string} content - Post content
+ * @param {string} currentUrl - Current page URL
+ * @returns {Promise<Object>} Publish result
+ */
+async function handlePublishProcess(driver, title, content, currentUrl) {
+  try {
+    // Look for Continue/Publish button
+    console.log(`🔍 Looking for Continue or Publish button...`);
+
+    const continueSelectors = [
+      'button[data-testid="publish-button"]',
+      '//button[contains(text(), "Continue")]',
+      '//button[contains(text(), "Next")]',
+      'button[data-testid="publish"]',
+    ];
+
+    let continueClicked = false;
+    for (const selector of continueSelectors) {
+      try {
+        const button = selector.startsWith("//")
+          ? await driver.findElement(By.xpath(selector))
+          : await driver.findElement(By.css(selector));
+
+        console.log(`✅ Found Continue button with selector: ${selector}`);
+        await button.click();
+        console.log(`✅ Clicked Continue button`);
+        continueClicked = true;
+        await driver.sleep(3000);
+        break;
+      } catch (e) {
+        console.log(`Button selector "${selector}" not found, trying next...`);
+        continue;
+      }
+    }
+
+    if (continueClicked) {
+      const newUrl = await driver.getCurrentUrl();
+      console.log(`📍 Now on publish settings page: ${newUrl}`);
+
+      // Look for final publish button
+      const publishSelectors = [
+        '//button[normalize-space(text())="Send to everyone now"]',
+        '//button[contains(text(), "Send to everyone now")]',
+        '//button[contains(text(), "Publish now")]',
+        'button[data-testid="final-publish"]',
+      ];
+
+      for (const selector of publishSelectors) {
+        try {
+          const publishButton = await driver.findElement(By.xpath(selector));
+          console.log(`✅ Found publish button with selector: ${selector}`);
+          await publishButton.click();
+          console.log(`✅ Clicked publish button`);
+          break;
+        } catch (e) {
+          console.log(
+            `Button selector "${selector}" not found, trying next...`
+          );
+          continue;
+        }
+      }
+    } else {
+      console.log(
+        `⚠️ Could not find Continue button, post may be saved as draft`
+      );
+    }
+
+    console.log(`🎉 Substack post published: "${title}"`);
+
+    return {
+      success: true,
+      title,
+      subtitle: "",
+      content: content.substring(0, 100) + (content.length > 100 ? "..." : ""),
+      isDraft: !continueClicked,
+      postUrl: await driver.getCurrentUrl(),
+      message: continueClicked
+        ? "Post published successfully"
+        : "Post saved as draft",
+      createdAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    console.error(`Error in publish process:`, error);
+    throw new Error(`Failed to publish post: ${error.message}`);
+  }
+}
 
 module.exports = {
   createSession,
@@ -1671,4 +2711,7 @@ module.exports = {
   getPageState,
   createSubstackAuthToken,
   createPost,
+  updateSessionStatus,
+  refreshSessionAuth,
+  shouldRefreshAuth,
 };
